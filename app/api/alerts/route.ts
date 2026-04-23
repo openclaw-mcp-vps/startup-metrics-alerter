@@ -1,67 +1,100 @@
-import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+
+import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { ensureLocalMonitorScheduler, runMonitoringCycle } from "@/lib/alert-engine";
-import { getAlertSettings, listAlertEvents, updateAlertSettings } from "@/lib/database";
-import { ensurePaidAccess } from "@/lib/request-auth";
-import { METRIC_KEYS } from "@/lib/types";
+import { requirePaidApiAccess } from "@/lib/api-auth";
+import { readAppState, sanitizeIntegration, updateAppState } from "@/lib/storage";
+import type { AlertRule } from "@/lib/types";
 
-const settingsSchema = z.object({
-  dropThresholdPercent: z.number().min(5).max(80).optional(),
-  minConfidence: z.number().min(0.3).max(0.99).optional(),
-  lookbackDays: z.number().min(7).max(90).optional(),
-  monitoredMetrics: z.array(z.enum(METRIC_KEYS)).min(1).optional(),
-  emailTo: z.string().optional(),
-  slackWebhookUrl: z.string().optional(),
-  timezone: z.string().min(2).max(64).optional(),
-  quietHoursStart: z.string().optional(),
-  quietHoursEnd: z.string().optional(),
+export const runtime = "nodejs";
+
+const alertRuleSchema = z.object({
+  id: z.string().optional(),
+  provider: z.enum(["google-analytics", "mixpanel"]),
+  metricKey: z.string().min(1),
+  minDropPercent: z.number().min(5).max(90),
+  lookbackPoints: z.number().min(3).max(60),
+  channel: z.enum(["email", "slack"]),
+  target: z.string().min(3),
+  enabled: z.boolean().default(true),
 });
 
-const updateActionSchema = z.object({
-  action: z.literal("update"),
-  settings: settingsSchema,
-});
+function createRule(payload: z.infer<typeof alertRuleSchema>): AlertRule {
+  const now = new Date().toISOString();
 
-const runNowActionSchema = z.object({
-  action: z.literal("run-now"),
-});
-
-const actionSchema = z.union([updateActionSchema, runNowActionSchema]);
-
-export async function GET(request: NextRequest) {
-  const authError = ensurePaidAccess(request);
-  if (authError) {
-    return authError;
-  }
-
-  ensureLocalMonitorScheduler();
-
-  const [settings, alerts] = await Promise.all([getAlertSettings(), listAlertEvents(30)]);
-
-  return NextResponse.json({ settings, alerts });
+  return {
+    id: payload.id ?? randomUUID(),
+    provider: payload.provider,
+    metricKey: payload.metricKey,
+    minDropPercent: payload.minDropPercent,
+    lookbackPoints: payload.lookbackPoints,
+    channel: payload.channel,
+    target: payload.target,
+    enabled: payload.enabled,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
-export async function POST(request: NextRequest) {
-  const authError = ensurePaidAccess(request);
-  if (authError) {
-    return authError;
+export async function GET() {
+  const denied = await requirePaidApiAccess();
+  if (denied) {
+    return denied;
   }
 
-  const body = await request.json();
-  const parsed = actionSchema.safeParse(body);
+  const state = await readAppState();
+
+  return NextResponse.json({
+    rules: state.alertRules,
+    alerts: state.alerts.slice(-120),
+    metrics: state.metrics.slice(-400),
+    integrations: state.integrations.map(sanitizeIntegration),
+  });
+}
+
+export async function POST(request: Request) {
+  const denied = await requirePaidApiAccess();
+  if (denied) {
+    return denied;
+  }
+
+  const body = await request.json().catch(() => null);
+  const parsed = alertRuleSchema.safeParse(body);
 
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid payload" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid alert rule payload." }, { status: 400 });
   }
 
   const payload = parsed.data;
 
-  if (payload.action === "update") {
-    const settings = await updateAlertSettings(payload.settings);
-    return NextResponse.json({ settings });
-  }
+  const nextState = await updateAppState((state) => {
+    const existingRule = payload.id
+      ? state.alertRules.find((rule) => rule.id === payload.id)
+      : null;
 
-  const result = await runMonitoringCycle("manual");
-  return NextResponse.json({ result });
+    if (existingRule) {
+      const updatedRule: AlertRule = {
+        ...existingRule,
+        ...payload,
+        updatedAt: new Date().toISOString(),
+      };
+
+      return {
+        ...state,
+        alertRules: state.alertRules.map((rule) =>
+          rule.id === updatedRule.id ? updatedRule : rule,
+        ),
+      };
+    }
+
+    const newRule = createRule(payload);
+
+    return {
+      ...state,
+      alertRules: [...state.alertRules, newRule],
+    };
+  });
+
+  return NextResponse.json({ rules: nextState.alertRules });
 }

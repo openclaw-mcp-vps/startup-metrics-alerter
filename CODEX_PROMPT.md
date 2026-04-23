@@ -11,27 +11,29 @@ NICHE: startup-tools
 PRICE: $$49/mo
 
 ARCHITECTURE SPEC:
-A Next.js SaaS application that connects to analytics APIs (Google Analytics, Mixpanel, etc.) to monitor startup KPIs and sends intelligent alerts via email/Slack when metrics drop below expected thresholds. Uses background jobs to fetch data periodically and ML-based anomaly detection to reduce false positives.
+A Next.js SaaS application that connects to analytics APIs (Google Analytics, Mixpanel, etc.) to monitor startup KPIs and sends intelligent alerts via email/Slack when metrics drop below expected thresholds. Uses background jobs to periodically fetch data, ML-based anomaly detection for smart alerting, and Lemon Squeezy for subscription billing.
 
 PLANNED FILES:
 - app/page.tsx
 - app/dashboard/page.tsx
 - app/api/auth/[...nextauth]/route.ts
 - app/api/webhooks/lemonsqueezy/route.ts
-- app/api/metrics/route.ts
+- app/api/integrations/google-analytics/route.ts
+- app/api/integrations/mixpanel/route.ts
 - app/api/alerts/route.ts
-- components/MetricCard.tsx
-- components/AlertSettings.tsx
-- components/IntegrationSetup.tsx
+- app/api/cron/check-metrics/route.ts
 - lib/analytics-connectors.ts
 - lib/alert-engine.ts
 - lib/anomaly-detection.ts
 - lib/notification-service.ts
-- lib/database.ts
+- lib/lemonsqueezy.ts
+- components/MetricCard.tsx
+- components/AlertSettings.tsx
+- components/IntegrationSetup.tsx
+- components/PricingCard.tsx
 - prisma/schema.prisma
-- middleware.ts
 
-DEPENDENCIES: next, react, typescript, tailwindcss, prisma, @prisma/client, next-auth, lemonsqueezy.js, @vercel/cron, resend, zod, recharts, lucide-react, googleapis, mixpanel, stripe, node-cron
+DEPENDENCIES: next, react, typescript, tailwindcss, prisma, @prisma/client, next-auth, googleapis, mixpanel, @lemonsqueezy/lemonsqueezy.js, resend, zod, recharts, lucide-react, date-fns, simple-statistics
 
 REQUIREMENTS:
 - Next.js 15 with App Router (app/ directory)

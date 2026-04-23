@@ -1,156 +1,85 @@
 import { Resend } from "resend";
 
-import type { AlertSettings, MetricKey } from "@/lib/types";
-
-interface AlertNotificationPayload {
-  metricKey: MetricKey;
-  metricLabel: string;
-  currentValue: number;
-  expectedValue: number;
-  dropPercent: number;
-  confidence: number;
-  summary: string;
-}
-
-interface NotificationResult {
-  sentChannels: string[];
-  detail: string[];
-}
+import type { AlertEvent } from "@/lib/types";
 
 const resendClient = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
-function formatNumber(metricKey: MetricKey, value: number) {
-  if (metricKey === "activation_rate" || metricKey === "trial_to_paid" || metricKey === "churn_rate") {
-    return `${value.toFixed(2)}%`;
+async function sendEmailAlert(alert: AlertEvent): Promise<void> {
+  if (!resendClient) {
+    throw new Error("RESEND_API_KEY is not configured.");
   }
 
-  if (metricKey === "mrr") {
-    return `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-  }
-
-  return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
-}
-
-async function sendEmail(settings: AlertSettings, payload: AlertNotificationPayload) {
-  if (!resendClient || !settings.emailTo) {
-    return false;
-  }
-
-  const recipients = settings.emailTo
-    .split(",")
-    .map((email) => email.trim())
-    .filter(Boolean);
-
-  if (recipients.length === 0) {
-    return false;
-  }
-
-  const fromAddress = process.env.ALERTS_FROM_EMAIL ?? "alerts@startup-metrics-alerter.com";
+  const from = process.env.ALERT_FROM_EMAIL ?? "alerts@startupmetricsalerter.com";
 
   await resendClient.emails.send({
-    from: fromAddress,
-    to: recipients,
-    subject: `Metric drop detected: ${payload.metricLabel}`,
-    text: `${payload.summary}\n\nCurrent: ${formatNumber(payload.metricKey, payload.currentValue)}\nExpected: ${formatNumber(payload.metricKey, payload.expectedValue)}\nDrop: ${payload.dropPercent.toFixed(1)}%\nConfidence: ${(payload.confidence * 100).toFixed(1)}%`,
+    from,
+    to: [alert.target],
+    subject: `KPI Alert: ${alert.metricKey} dropped ${alert.dropPercent.toFixed(1)}%`,
+    html: `
+      <h2>Startup Metrics Alert</h2>
+      <p><strong>${alert.message}</strong></p>
+      <ul>
+        <li>Provider: ${alert.provider}</li>
+        <li>Metric: ${alert.metricKey}</li>
+        <li>Current value: ${alert.currentValue}</li>
+        <li>Baseline: ${alert.baseline.toFixed(2)}</li>
+        <li>Drop: ${alert.dropPercent.toFixed(2)}%</li>
+        <li>Z-score: ${alert.zScore.toFixed(2)}</li>
+      </ul>
+      <p>Review your dashboard to inspect funnel and acquisition performance immediately.</p>
+    `,
   });
-
-  return true;
 }
 
-async function sendSlack(settings: AlertSettings, payload: AlertNotificationPayload) {
-  if (!settings.slackWebhookUrl) {
-    return false;
+async function sendSlackAlert(alert: AlertEvent): Promise<void> {
+  const webhookUrl = alert.target || process.env.SLACK_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    throw new Error("Slack webhook URL is not configured.");
   }
 
-  const response = await fetch(settings.slackWebhookUrl, {
+  const response = await fetch(webhookUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      text: `*${payload.metricLabel}* dropped by *${payload.dropPercent.toFixed(1)}%*`,
-      blocks: [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: `Metric drop detected: ${payload.metricLabel}`,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*Current*\n${formatNumber(payload.metricKey, payload.currentValue)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Expected*\n${formatNumber(payload.metricKey, payload.expectedValue)}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Drop*\n${payload.dropPercent.toFixed(1)}%`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Confidence*\n${(payload.confidence * 100).toFixed(1)}%`,
-            },
-          ],
-        },
-        {
-          type: "context",
-          elements: [
-            {
-              type: "mrkdwn",
-              text: payload.summary,
-            },
-          ],
-        },
-      ],
+      text: `:warning: ${alert.message}\nProvider: ${alert.provider}\nMetric: ${alert.metricKey}\nCurrent: ${alert.currentValue.toFixed(
+        2,
+      )} | Baseline: ${alert.baseline.toFixed(2)} | Drop: ${alert.dropPercent.toFixed(2)}%`,
     }),
   });
 
-  return response.ok;
+  if (!response.ok) {
+    throw new Error(`Slack returned ${response.status}`);
+  }
 }
 
-export async function sendAlertNotifications(
-  settings: AlertSettings,
-  payload: AlertNotificationPayload,
-): Promise<NotificationResult> {
-  const sentChannels: string[] = [];
-  const detail: string[] = [];
+export async function deliverAlerts(alerts: AlertEvent[]): Promise<AlertEvent[]> {
+  const deliveredAlerts: AlertEvent[] = [];
 
-  try {
-    const emailSent = await sendEmail(settings, payload);
-    if (emailSent) {
-      sentChannels.push("email");
-      detail.push("Email alert delivered.");
-    } else if (settings.emailTo) {
-      detail.push("Email alert skipped (Resend not configured or no recipients).");
+  for (const alert of alerts) {
+    const next = { ...alert };
+
+    try {
+      if (alert.channel === "email") {
+        await sendEmailAlert(alert);
+      } else {
+        await sendSlackAlert(alert);
+      }
+
+      next.delivered = true;
+      next.deliveryError = null;
+    } catch (error) {
+      next.delivered = false;
+      next.deliveryError =
+        error instanceof Error ? error.message : "Unknown delivery error";
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    detail.push(`Email alert failed: ${message}`);
+
+    deliveredAlerts.push(next);
   }
 
-  try {
-    const slackSent = await sendSlack(settings, payload);
-    if (slackSent) {
-      sentChannels.push("slack");
-      detail.push("Slack alert delivered.");
-    } else if (settings.slackWebhookUrl) {
-      detail.push("Slack alert failed with non-2xx response.");
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    detail.push(`Slack alert failed: ${message}`);
-  }
-
-  return {
-    sentChannels,
-    detail,
-  };
+  return deliveredAlerts;
 }

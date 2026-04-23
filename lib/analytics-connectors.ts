@@ -1,248 +1,191 @@
+import { randomUUID } from "node:crypto";
+
+import { formatISO, subDays } from "date-fns";
 import { google } from "googleapis";
+import Mixpanel from "mixpanel";
 
-import { type Integration, type MetricKey, METRIC_KEYS, type MetricPoint } from "@/lib/types";
+import type { IntegrationRecord, MetricSnapshot } from "@/lib/types";
 
-interface CollectMetricsResult {
-  points: Array<Omit<MetricPoint, "id">>;
-  detail: string[];
+interface GoogleAnalyticsConfig {
+  propertyId: string;
+  serviceAccountEmail: string;
+  serviceAccountPrivateKey: string;
+  metricNames: string[];
 }
 
-function toIsoDateAtUTC(dateText: string) {
-  if (/^\d{8}$/.test(dateText)) {
-    const year = dateText.slice(0, 4);
-    const month = dateText.slice(4, 6);
-    const day = dateText.slice(6, 8);
-    return `${year}-${month}-${day}T00:00:00.000Z`;
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
-    return `${dateText}T00:00:00.000Z`;
-  }
-
-  const parsed = new Date(dateText);
-  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+interface MixpanelConfig {
+  apiSecret: string;
+  eventName: string;
+  projectToken?: string;
 }
 
-function getIsoDateOffset(days: number) {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
+function isoDate(daysAgo = 0): string {
+  return formatISO(subDays(new Date(), daysAgo), { representation: "date" });
 }
 
-function normalizeNumber(value: unknown) {
-  const parsed = typeof value === "string" ? Number.parseFloat(value) : Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+function normalizeMetricKey(metricName: string): string {
+  return metricName.trim().toLowerCase();
 }
 
-async function fetchGoogleAnalyticsSeries(
-  integration: Integration,
-  metricName: string,
-  metricKey: MetricKey,
-  lookbackDays: number,
-): Promise<Array<Omit<MetricPoint, "id">>> {
-  const propertyId = integration.config.propertyId;
-  const serviceAccountJson = integration.config.serviceAccountJson;
-
-  if (!propertyId || !serviceAccountJson) {
-    return [];
-  }
-
-  const credentials = JSON.parse(serviceAccountJson) as {
-    client_email: string;
-    private_key: string;
-  };
-
-  const auth = new google.auth.GoogleAuth({
-    credentials,
+export async function fetchGoogleAnalyticsMetrics(
+  config: GoogleAnalyticsConfig,
+): Promise<MetricSnapshot[]> {
+  const auth = new google.auth.JWT({
+    email: config.serviceAccountEmail,
+    key: config.serviceAccountPrivateKey.replace(/\\n/g, "\n"),
     scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
   });
 
-  const analyticsData = google.analyticsdata({ version: "v1beta", auth });
+  const analyticsData = google.analyticsdata({
+    version: "v1beta",
+    auth,
+  });
 
-  const response = await analyticsData.properties.runReport({
-    property: `properties/${propertyId}`,
+  const selectedMetrics =
+    config.metricNames.length > 0
+      ? config.metricNames
+      : ["sessions", "activeUsers", "newUsers"];
+
+  const report = await analyticsData.properties.runReport({
+    property: `properties/${config.propertyId}`,
     requestBody: {
-      dimensions: [{ name: "date" }],
-      metrics: [{ name: metricName }],
-      dateRanges: [
-        {
-          startDate: `${Math.max(lookbackDays, 1)}daysAgo`,
-          endDate: "today",
-        },
-      ],
-      orderBys: [{ dimension: { dimensionName: "date" } }],
+      dateRanges: [{ startDate: "2daysAgo", endDate: "today" }],
+      metrics: selectedMetrics.map((name) => ({ name })),
+      limit: "1",
     },
   });
 
-  return (
-    response.data.rows?.map((row) => ({
-      provider: integration.provider,
-      metricKey,
-      value: normalizeNumber(row.metricValues?.[0]?.value),
-      capturedAt: toIsoDateAtUTC(row.dimensionValues?.[0]?.value ?? new Date().toISOString()),
-    })) ?? []
-  );
-}
+  const row = report.data.rows?.[0];
 
-async function fetchMixpanelEventSeries(
-  integration: Integration,
-  metricKey: MetricKey,
-  eventName: string,
-  lookbackDays: number,
-): Promise<Array<Omit<MetricPoint, "id">>> {
-  const username = integration.config.serviceAccountUsername;
-  const secret = integration.config.serviceAccountSecret;
-
-  if (!username || !secret || !eventName) {
-    return [];
+  if (!row?.metricValues?.length) {
+    throw new Error("Google Analytics returned no metric rows.");
   }
 
-  const fromDate = getIsoDateOffset(lookbackDays);
-  const toDate = getIsoDateOffset(0);
+  const nowIso = new Date().toISOString();
+
+  return selectedMetrics.map((metricName, index) => {
+    const value = Number(row.metricValues?.[index]?.value ?? "0");
+
+    return {
+      id: randomUUID(),
+      provider: "google-analytics",
+      metricKey: normalizeMetricKey(metricName),
+      value,
+      capturedAt: nowIso,
+    } satisfies MetricSnapshot;
+  });
+}
+
+export async function fetchMixpanelMetrics(
+  config: MixpanelConfig,
+): Promise<MetricSnapshot[]> {
+  if (config.projectToken) {
+    Mixpanel.init(config.projectToken);
+  }
 
   const url = new URL("https://mixpanel.com/api/query/segmentation");
-  url.searchParams.set("event", JSON.stringify([eventName]));
-  url.searchParams.set("from_date", fromDate);
-  url.searchParams.set("to_date", toDate);
+  url.searchParams.set("from_date", isoDate(2));
+  url.searchParams.set("to_date", isoDate(0));
+  url.searchParams.set("event", JSON.stringify([config.eventName]));
   url.searchParams.set("unit", "day");
   url.searchParams.set("type", "general");
 
+  const authHeader = Buffer.from(`${config.apiSecret}:`).toString("base64");
+
   const response = await fetch(url, {
-    method: "GET",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${username}:${secret}`).toString("base64")}`,
-      "Content-Type": "application/json",
+      Authorization: `Basic ${authHeader}`,
+      Accept: "application/json",
     },
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error(`Mixpanel API request failed (${response.status})`);
+    const body = await response.text();
+    throw new Error(`Mixpanel API ${response.status}: ${body.slice(0, 180)}`);
   }
 
   const payload = (await response.json()) as {
     data?: {
-      series?: Record<string, number[]>;
       values?: Record<string, Record<string, number>>;
-      xValues?: string[];
     };
   };
 
-  const valuesMap = payload.data?.values?.[eventName];
+  const series = payload.data?.values?.[config.eventName];
 
-  if (valuesMap) {
-    return Object.entries(valuesMap).map(([date, value]) => ({
-      provider: integration.provider,
-      metricKey,
-      value: normalizeNumber(value),
-      capturedAt: toIsoDateAtUTC(date),
-    }));
+  if (!series) {
+    throw new Error("Mixpanel returned no values for the configured event.");
   }
 
-  const series = payload.data?.series?.[eventName];
-  const xValues = payload.data?.xValues;
+  const latestDate = Object.keys(series).sort().at(-1);
 
-  if (!series || !xValues || series.length !== xValues.length) {
-    return [];
+  if (!latestDate) {
+    throw new Error("Mixpanel series has no date keys.");
   }
 
-  return xValues.map((date, index) => ({
-    provider: integration.provider,
-    metricKey,
-    value: normalizeNumber(series[index]),
-    capturedAt: toIsoDateAtUTC(date),
-  }));
+  const latestValue = Number(series[latestDate]);
+
+  return [
+    {
+      id: randomUUID(),
+      provider: "mixpanel",
+      metricKey: `events:${normalizeMetricKey(config.eventName)}`,
+      value: latestValue,
+      capturedAt: new Date().toISOString(),
+    },
+  ];
 }
 
-export async function collectMetricsFromIntegrations(
-  integrations: Integration[],
-  lookbackDays: number,
-): Promise<CollectMetricsResult> {
-  const points: Array<Omit<MetricPoint, "id">> = [];
-  const detail: string[] = [];
+function readStringConfig(
+  config: IntegrationRecord["config"],
+  key: string,
+): string {
+  const value = config[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Missing integration config value: ${key}`);
+  }
+  return value;
+}
 
-  for (const integration of integrations) {
-    if (!integration.enabled) {
-      continue;
-    }
+function readStringArrayConfig(
+  config: IntegrationRecord["config"],
+  key: string,
+): string[] {
+  const value = config[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string");
+}
 
-    if (integration.provider === "google-analytics") {
-      const gaMetricMap: Partial<Record<MetricKey, string>> = {
-        signups: integration.config.signupsMetric || "newUsers",
-        activation_rate: integration.config.activationRateMetric || "engagementRate",
-        trial_to_paid: integration.config.trialToPaidMetric || "purchaseToViewRate",
-        mrr: integration.config.mrrMetric || "purchaseRevenue",
-        churn_rate: integration.config.churnRateMetric || "",
-      };
-
-      for (const metricKey of METRIC_KEYS) {
-        const metricName = gaMetricMap[metricKey];
-
-        if (!metricName) {
-          continue;
-        }
-
-        try {
-          const metricPoints = await fetchGoogleAnalyticsSeries(
-            integration,
-            metricName,
-            metricKey,
-            lookbackDays,
-          );
-          points.push(...metricPoints);
-
-          if (metricPoints.length > 0) {
-            detail.push(
-              `Fetched ${metricPoints.length} ${metricKey} points from ${integration.name}.`,
-            );
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown error";
-          detail.push(`Google Analytics (${integration.name}) ${metricKey} failed: ${message}`);
-        }
-      }
-
-      continue;
-    }
-
-    if (integration.provider === "mixpanel") {
-      const mixpanelMetricMap: Partial<Record<MetricKey, string>> = {
-        signups: integration.config.signupsEvent,
-        activation_rate: integration.config.activationEvent,
-        trial_to_paid: integration.config.trialToPaidEvent,
-        mrr: integration.config.mrrEvent,
-        churn_rate: integration.config.churnEvent,
-      };
-
-      for (const metricKey of METRIC_KEYS) {
-        const eventName = mixpanelMetricMap[metricKey];
-
-        if (!eventName) {
-          continue;
-        }
-
-        try {
-          const metricPoints = await fetchMixpanelEventSeries(
-            integration,
-            metricKey,
-            eventName,
-            lookbackDays,
-          );
-          points.push(...metricPoints);
-
-          if (metricPoints.length > 0) {
-            detail.push(`Fetched ${metricPoints.length} ${metricKey} points from ${integration.name}.`);
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Unknown error";
-          detail.push(`Mixpanel (${integration.name}) ${metricKey} failed: ${message}`);
-        }
-      }
-    }
+export async function fetchMetricsForIntegration(
+  integration: IntegrationRecord,
+): Promise<MetricSnapshot[]> {
+  if (integration.provider === "google-analytics") {
+    return fetchGoogleAnalyticsMetrics({
+      propertyId: readStringConfig(integration.config, "propertyId"),
+      serviceAccountEmail: readStringConfig(
+        integration.config,
+        "serviceAccountEmail",
+      ),
+      serviceAccountPrivateKey: readStringConfig(
+        integration.config,
+        "serviceAccountPrivateKey",
+      ),
+      metricNames: readStringArrayConfig(integration.config, "metricNames"),
+    });
   }
 
-  return {
-    points,
-    detail,
-  };
+  if (integration.provider === "mixpanel") {
+    return fetchMixpanelMetrics({
+      apiSecret: readStringConfig(integration.config, "apiSecret"),
+      eventName: readStringConfig(integration.config, "eventName"),
+      projectToken:
+        typeof integration.config.projectToken === "string"
+          ? integration.config.projectToken
+          : undefined,
+    });
+  }
+
+  throw new Error(`Unsupported provider: ${integration.provider}`);
 }

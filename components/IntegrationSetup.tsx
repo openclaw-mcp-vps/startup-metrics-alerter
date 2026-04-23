@@ -1,239 +1,227 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 
-import type { Integration, IntegrationProvider } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import type { IntegrationRecord } from "@/lib/types";
 
 interface IntegrationSetupProps {
-  initialIntegrations: Integration[];
+  googleAnalyticsIntegration?: IntegrationRecord;
+  mixpanelIntegration?: IntegrationRecord;
+  onUpdated: () => Promise<void>;
 }
 
-const providerExamples: Record<IntegrationProvider, string> = {
-  "google-analytics": JSON.stringify(
-    {
-      propertyId: "123456789",
-      serviceAccountJson: "{...full service account JSON...}",
-      signupsMetric: "newUsers",
-      activationRateMetric: "engagementRate",
-      trialToPaidMetric: "purchaseToViewRate",
-      mrrMetric: "purchaseRevenue",
-    },
-    null,
-    2,
-  ),
-  mixpanel: JSON.stringify(
-    {
-      serviceAccountUsername: "service-account",
-      serviceAccountSecret: "mp_secret",
-      signupsEvent: "Signed Up",
-      activationEvent: "Workspace Activated",
-      trialToPaidEvent: "Subscribed",
-      mrrEvent: "Recurring Revenue Updated",
-      churnEvent: "Subscription Canceled",
-    },
-    null,
-    2,
-  ),
-};
+export function IntegrationSetup({
+  googleAnalyticsIntegration,
+  mixpanelIntegration,
+  onUpdated,
+}: IntegrationSetupProps) {
+  const [gaPropertyId, setGaPropertyId] = useState("");
+  const [gaServiceEmail, setGaServiceEmail] = useState("");
+  const [gaPrivateKey, setGaPrivateKey] = useState("");
+  const [gaMetricNames, setGaMetricNames] = useState("sessions,activeUsers,newUsers");
 
-export function IntegrationSetup({ initialIntegrations }: IntegrationSetupProps) {
-  const [integrations, setIntegrations] = useState<Integration[]>(initialIntegrations);
-  const [provider, setProvider] = useState<IntegrationProvider>("google-analytics");
-  const [name, setName] = useState("Primary analytics source");
-  const [configText, setConfigText] = useState(providerExamples["google-analytics"]);
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [mixpanelApiSecret, setMixpanelApiSecret] = useState("");
+  const [mixpanelEventName, setMixpanelEventName] = useState("Signup Completed");
+  const [mixpanelProjectToken, setMixpanelProjectToken] = useState("");
 
-  const providerHint = useMemo(() => providerExamples[provider], [provider]);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [isSavingGa, setIsSavingGa] = useState(false);
+  const [isSavingMixpanel, setIsSavingMixpanel] = useState(false);
 
-  const refreshIntegrations = async () => {
-    const response = await fetch("/api/integrations", { cache: "no-store" });
-    const payload = (await response.json()) as { integrations?: Integration[]; error?: string };
-
-    if (!response.ok || !payload.integrations) {
-      setStatus(payload.error ?? "Failed to refresh integrations.");
-      return;
-    }
-
-    setIntegrations(payload.integrations);
-  };
-
-  const createIntegration = async () => {
-    setLoading(true);
-    setStatus("Saving integration...");
-
-    let parsedConfig: Record<string, string>;
+  async function connectGoogleAnalytics(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setIsSavingGa(true);
+    setStatusMessage(null);
 
     try {
-      parsedConfig = JSON.parse(configText) as Record<string, string>;
-    } catch {
-      setLoading(false);
-      setStatus("Config JSON is invalid.");
-      return;
+      const response = await fetch("/api/integrations/google-analytics", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          propertyId: gaPropertyId,
+          serviceAccountEmail: gaServiceEmail,
+          serviceAccountPrivateKey: gaPrivateKey,
+          metricNames: gaMetricNames.split(",").map((item) => item.trim()).filter(Boolean),
+        }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Google Analytics connection failed.");
+      }
+
+      setStatusMessage("Google Analytics connected and metrics fetched successfully.");
+      await onUpdated();
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : "Google Analytics connection failed.",
+      );
+    } finally {
+      setIsSavingGa(false);
     }
+  }
 
-    const response = await fetch("/api/integrations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "create",
-        provider,
-        name,
-        config: parsedConfig,
-      }),
-    });
+  async function connectMixpanel(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setIsSavingMixpanel(true);
+    setStatusMessage(null);
 
-    const payload = (await response.json()) as { error?: string };
+    try {
+      const response = await fetch("/api/integrations/mixpanel", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          apiSecret: mixpanelApiSecret,
+          eventName: mixpanelEventName,
+          projectToken: mixpanelProjectToken,
+        }),
+      });
 
-    if (!response.ok) {
-      setLoading(false);
-      setStatus(payload.error ?? "Failed to save integration.");
-      return;
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Mixpanel connection failed.");
+      }
+
+      setStatusMessage("Mixpanel connected and event volume fetched successfully.");
+      await onUpdated();
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : "Mixpanel connection failed.",
+      );
+    } finally {
+      setIsSavingMixpanel(false);
     }
-
-    await refreshIntegrations();
-    setLoading(false);
-    setStatus("Integration saved.");
-  };
-
-  const toggleIntegration = async (id: string, enabled: boolean) => {
-    setLoading(true);
-
-    await fetch("/api/integrations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "toggle",
-        id,
-        enabled,
-      }),
-    });
-
-    await refreshIntegrations();
-    setLoading(false);
-  };
-
-  const deleteIntegration = async (id: string) => {
-    setLoading(true);
-
-    await fetch("/api/integrations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action: "delete",
-        id,
-      }),
-    });
-
-    await refreshIntegrations();
-    setLoading(false);
-  };
+  }
 
   return (
-    <section className="rounded-2xl border border-[#30363d] bg-[#161b22]/70 p-5">
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold text-[#f0f6fc]">Data Integrations</h2>
-        <p className="mt-1 text-sm text-[#8b949e]">
-          Connect Google Analytics or Mixpanel to pull KPI history automatically.
-        </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <label className="space-y-2 text-sm text-[#c9d1d9]">
-          <span>Provider</span>
-          <select
-            value={provider}
-            onChange={(event) => {
-              const value = event.target.value as IntegrationProvider;
-              setProvider(value);
-              setConfigText(providerExamples[value]);
-            }}
-            className="w-full rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2 text-sm outline-none focus:border-[#58a6ff]"
-          >
-            <option value="google-analytics">Google Analytics 4</option>
-            <option value="mixpanel">Mixpanel</option>
-          </select>
-        </label>
-
-        <label className="space-y-2 text-sm text-[#c9d1d9]">
-          <span>Connection name</span>
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            className="w-full rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2 text-sm outline-none focus:border-[#58a6ff]"
-          />
-        </label>
-      </div>
-
-      <label className="mt-4 block space-y-2 text-sm text-[#c9d1d9]">
-        <span>Config JSON</span>
-        <textarea
-          value={configText}
-          onChange={(event) => setConfigText(event.target.value)}
-          className="min-h-[180px] w-full rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2 text-xs font-medium text-[#c9d1d9] outline-none focus:border-[#58a6ff]"
-          spellCheck={false}
-        />
-      </label>
-
-      <p className="mt-2 text-xs text-[#8b949e]">
-        Example for {provider}: <span className="font-mono">{providerHint.slice(0, 80)}...</span>
-      </p>
-
-      <button
-        type="button"
-        disabled={loading}
-        onClick={createIntegration}
-        className="mt-4 rounded-xl bg-[#1f6feb] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#388bfd] disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        Save integration
-      </button>
-
-      <p className="mt-2 text-xs text-[#8b949e]">{status}</p>
-
-      <div className="mt-6 space-y-3">
-        {integrations.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#30363d] bg-[#0d1117] p-4 text-sm text-[#8b949e]">
-            No integrations configured yet.
+    <Card>
+      <CardHeader>
+        <CardTitle>Integrations</CardTitle>
+        <CardDescription>
+          Connect your analytics sources so Startup Metrics Alerter can monitor KPI health continuously.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-8">
+        <form className="space-y-3" onSubmit={connectGoogleAnalytics}>
+          <h4 className="text-sm font-semibold text-slate-200">Google Analytics 4</h4>
+          <p className="text-xs text-slate-400">
+            Status: {googleAnalyticsIntegration?.enabled ? "Connected" : "Not connected"}
+            {googleAnalyticsIntegration?.lastError
+              ? ` • Last error: ${googleAnalyticsIntegration.lastError}`
+              : ""}
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm text-slate-300">
+              Property ID
+              <Input
+                value={gaPropertyId}
+                onChange={(event) => setGaPropertyId(event.target.value)}
+                placeholder="123456789"
+                required
+              />
+            </label>
+            <label className="space-y-1 text-sm text-slate-300">
+              Service account email
+              <Input
+                type="email"
+                value={gaServiceEmail}
+                onChange={(event) => setGaServiceEmail(event.target.value)}
+                placeholder="analytics-reader@project.iam.gserviceaccount.com"
+                required
+              />
+            </label>
           </div>
-        ) : (
-          integrations.map((integration) => (
-            <div
-              key={integration.id}
-              className="flex flex-col gap-3 rounded-xl border border-[#30363d] bg-[#0d1117] p-4 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div>
-                <p className="text-sm font-semibold text-[#f0f6fc]">{integration.name}</p>
-                <p className="text-xs text-[#8b949e]">
-                  {integration.provider} • {integration.enabled ? "enabled" : "paused"}
-                </p>
-              </div>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => toggleIntegration(integration.id, !integration.enabled)}
-                  className="rounded-lg border border-[#58a6ff] px-3 py-1.5 text-xs font-semibold text-[#79c0ff]"
-                >
-                  {integration.enabled ? "Pause" : "Enable"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deleteIntegration(integration.id)}
-                  className="rounded-lg border border-[#ff7b72] px-3 py-1.5 text-xs font-semibold text-[#ff7b72]"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
+          <label className="space-y-1 text-sm text-slate-300">
+            Service account private key
+            <Textarea
+              value={gaPrivateKey}
+              onChange={(event) => setGaPrivateKey(event.target.value)}
+              placeholder="-----BEGIN PRIVATE KEY-----"
+              required
+            />
+          </label>
+
+          <label className="space-y-1 text-sm text-slate-300">
+            Metrics to track (comma separated)
+            <Input
+              value={gaMetricNames}
+              onChange={(event) => setGaMetricNames(event.target.value)}
+              placeholder="sessions,activeUsers,newUsers"
+              required
+            />
+          </label>
+
+          <Button type="submit" disabled={isSavingGa}>
+            {isSavingGa ? "Connecting..." : "Connect Google Analytics"}
+          </Button>
+        </form>
+
+        <form className="space-y-3" onSubmit={connectMixpanel}>
+          <h4 className="text-sm font-semibold text-slate-200">Mixpanel</h4>
+          <p className="text-xs text-slate-400">
+            Status: {mixpanelIntegration?.enabled ? "Connected" : "Not connected"}
+            {mixpanelIntegration?.lastError
+              ? ` • Last error: ${mixpanelIntegration.lastError}`
+              : ""}
+          </p>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-sm text-slate-300">
+              API secret
+              <Input
+                type="password"
+                value={mixpanelApiSecret}
+                onChange={(event) => setMixpanelApiSecret(event.target.value)}
+                placeholder="mixpanel_api_secret"
+                required
+              />
+            </label>
+            <label className="space-y-1 text-sm text-slate-300">
+              Event name to monitor
+              <Input
+                value={mixpanelEventName}
+                onChange={(event) => setMixpanelEventName(event.target.value)}
+                placeholder="Signup Completed"
+                required
+              />
+            </label>
+          </div>
+
+          <label className="space-y-1 text-sm text-slate-300">
+            Project token (optional)
+            <Input
+              value={mixpanelProjectToken}
+              onChange={(event) => setMixpanelProjectToken(event.target.value)}
+              placeholder="mixpanel_project_token"
+            />
+          </label>
+
+          <Button type="submit" disabled={isSavingMixpanel}>
+            {isSavingMixpanel ? "Connecting..." : "Connect Mixpanel"}
+          </Button>
+        </form>
+
+        {statusMessage ? <p className="text-sm text-slate-300">{statusMessage}</p> : null}
+      </CardContent>
+    </Card>
   );
 }

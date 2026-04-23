@@ -6,29 +6,33 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "lint": "next lint"
   },
   "dependencies": {
-    "googleapis": "^146.0.0",
     "@lemonsqueezy/lemonsqueezy.js": "^4.0.0",
-    "lucide-react": "^0.525.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "googleapis": "^144.0.0",
+    "lucide-react": "^0.511.0",
     "mixpanel": "^0.18.1",
     "next": "^15.0.0",
-    "next-auth": "^4.24.7",
-    "node-cron": "^4.2.1",
+    "next-auth": "^4.24.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "recharts": "^3.2.0",
-    "resend": "^4.1.2",
+    "recharts": "^2.15.0",
+    "resend": "^4.4.1",
+    "simple-statistics": "^7.8.8",
     "stripe": "^18.0.0",
-    "tailwindcss": "^4.1.4",
-    "zod": "^4.0.14"
+    "tailwind-merge": "^3.3.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.4",
-    "@types/node": "^22.10.5",
+    "@tailwindcss/postcss": "^4.1.10",
+    "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "tailwindcss": "^4.1.10"
   }
 }

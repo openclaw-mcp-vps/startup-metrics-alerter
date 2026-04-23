@@ -1,88 +1,63 @@
-export const METRIC_KEYS = [
-  "mrr",
-  "signups",
-  "activation_rate",
-  "trial_to_paid",
-  "churn_rate",
-] as const;
-
-export type MetricKey = (typeof METRIC_KEYS)[number];
-
-export const METRIC_LABELS: Record<MetricKey, string> = {
-  mrr: "Monthly Recurring Revenue",
-  signups: "Signups",
-  activation_rate: "Activation Rate",
-  trial_to_paid: "Trial to Paid Conversion",
-  churn_rate: "Churn Rate",
-};
-
 export type IntegrationProvider = "google-analytics" | "mixpanel";
+export type NotificationChannel = "email" | "slack";
 
-export interface Integration {
+export interface MetricSnapshot {
   id: string;
   provider: IntegrationProvider;
-  name: string;
-  config: Record<string, string>;
+  metricKey: string;
+  value: number;
+  capturedAt: string;
+}
+
+export interface IntegrationRecord {
+  provider: IntegrationProvider;
+  enabled: boolean;
+  connectedAt: string | null;
+  updatedAt: string;
+  lastError: string | null;
+  config: Record<string, string | string[] | boolean>;
+}
+
+export interface AlertRule {
+  id: string;
+  provider: IntegrationProvider;
+  metricKey: string;
+  minDropPercent: number;
+  lookbackPoints: number;
+  channel: NotificationChannel;
+  target: string;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface AlertSettings {
-  dropThresholdPercent: number;
-  minConfidence: number;
-  lookbackDays: number;
-  monitoredMetrics: MetricKey[];
-  emailTo: string;
-  slackWebhookUrl?: string;
-  timezone: string;
-  quietHoursStart?: string;
-  quietHoursEnd?: string;
-  updatedAt: string;
-}
-
-export interface MetricPoint {
-  id: string;
-  provider: IntegrationProvider;
-  metricKey: MetricKey;
-  value: number;
-  capturedAt: string;
-}
-
 export interface AlertEvent {
   id: string;
-  metricKey: MetricKey;
-  provider: IntegrationProvider | "aggregated";
-  expectedValue: number;
+  provider: IntegrationProvider;
+  metricKey: string;
+  baseline: number;
   currentValue: number;
   dropPercent: number;
-  confidence: number;
-  summary: string;
-  sentChannels: string[];
+  zScore: number;
+  severity: "medium" | "high";
+  message: string;
+  channel: NotificationChannel;
+  target: string;
   createdAt: string;
+  delivered: boolean;
+  deliveryError: string | null;
 }
 
-export interface PurchaseRecord {
-  id: string;
+export interface PaymentRecord {
   sessionId: string;
-  email: string;
-  amountTotal: number;
-  currency: string;
+  email: string | null;
   createdAt: string;
 }
 
-export interface DashboardMetricSummary {
-  metricKey: MetricKey;
-  label: string;
-  latestValue: number | null;
-  previousValue: number | null;
-  changePercent: number | null;
-  sparkline: Array<{ date: string; value: number }>;
-}
-
-export interface MonitorRunResult {
-  fetchedPoints: number;
-  anomaliesDetected: number;
-  notificationsSent: number;
-  detail: string[];
+export interface AppState {
+  integrations: IntegrationRecord[];
+  metrics: MetricSnapshot[];
+  alertRules: AlertRule[];
+  alerts: AlertEvent[];
+  paidSessions: PaymentRecord[];
 }

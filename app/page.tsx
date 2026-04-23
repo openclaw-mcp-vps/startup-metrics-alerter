@@ -1,229 +1,179 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import {
-  AlertCircle,
-  BarChart3,
+  AlertTriangle,
+  ArrowRight,
   BellRing,
-  Bot,
-  CheckCircle2,
-  ShieldAlert,
+  ChartNoAxesCombined,
+  Clock,
+  ShieldCheck,
 } from "lucide-react";
 
-import { hasPaywallAccess } from "@/lib/paywall";
+import { CheckoutSessionActivator } from "@/components/CheckoutSessionActivator";
+import { PricingCard } from "@/components/PricingCard";
+import { ACCESS_COOKIE_NAME, verifyAccessToken } from "@/lib/paywall";
 
 const faqs = [
   {
-    question: "How quickly do alerts fire after a KPI drop?",
+    question: "Which KPIs can I monitor?",
     answer:
-      "The monitor runs every 30 minutes by default. You can trigger a manual run instantly from the dashboard whenever you deploy a new campaign or pricing test.",
+      "Any metric your Google Analytics 4 property or Mixpanel project exposes, including sessions, activation events, signups, and funnel milestones.",
   },
   {
-    question: "Will I get noisy alerts from random daily swings?",
+    question: "How are alerts triggered?",
     answer:
-      "The alert engine compares current values against an adaptive baseline and confidence score, then suppresses duplicate alerts for 12 hours to reduce false positives.",
+      "Each metric gets a rolling baseline. If current values drop below your configured threshold and statistical lower bound, an alert is fired.",
   },
   {
-    question: "Which metrics can I track?",
+    question: "How do I receive notifications?",
     answer:
-      "Out of the box: MRR, signups, activation rate, trial-to-paid conversion, and churn. You can map each one to Google Analytics or Mixpanel fields/events.",
+      "You can route alerts to founder email addresses through Resend or directly into Slack using incoming webhook URLs.",
   },
   {
-    question: "Can I send alerts to both email and Slack?",
+    question: "Will this work with Stripe Payment Links?",
     answer:
-      "Yes. Configure one or both channels in Alert Rules. You can also set quiet hours so alerts queue instead of pinging your team overnight.",
+      "Yes. The pricing button opens Stripe hosted checkout directly. After successful payment, Stripe webhook confirmation unlocks dashboard access via secure cookie.",
   },
 ];
 
-export default async function HomePage() {
-  const paymentLink = process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK;
-  const hasAccess = await hasPaywallAccess();
+export default async function LandingPage() {
+  const cookieStore = await cookies();
+  const hasAccess = verifyAccessToken(
+    cookieStore.get(ACCESS_COOKIE_NAME)?.value,
+  );
 
   return (
-    <main className="relative overflow-hidden bg-[#0d1117]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(31,111,235,0.25),transparent_38%),radial-gradient(circle_at_85%_0%,rgba(63,185,80,0.16),transparent_45%),linear-gradient(180deg,rgba(13,17,23,1),rgba(13,17,23,0.98))]" />
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-24 px-6 py-10 md:px-10">
+      <header className="space-y-8 rounded-2xl border border-slate-800 bg-slate-900/40 p-8 shadow-[0_0_0_1px_rgba(148,163,184,0.05)] md:p-12">
+        <p className="inline-flex items-center gap-2 rounded-full border border-orange-400/35 bg-orange-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-orange-300">
+          <BellRing className="h-3.5 w-3.5" aria-hidden />
+          Startup Tools
+        </p>
 
-      <div className="relative mx-auto w-full max-w-6xl px-6 pb-24 pt-8 sm:px-10 lg:px-12">
-        <header className="flex items-center justify-between rounded-2xl border border-[#30363d] bg-[#161b22]/70 px-4 py-3 backdrop-blur">
-          <p className="text-sm font-semibold tracking-wide text-[#f0f6fc]">Startup Metrics Alerter</p>
-          <nav className="flex items-center gap-4 text-sm text-[#8b949e]">
-            <a href="#problem" className="hover:text-[#f0f6fc]">
-              Problem
-            </a>
-            <a href="#solution" className="hover:text-[#f0f6fc]">
-              Solution
-            </a>
-            <a href="#pricing" className="hover:text-[#f0f6fc]">
-              Pricing
-            </a>
-            <Link href={hasAccess ? "/dashboard" : "/dashboard/unlock"} className="rounded-lg bg-[#1f6feb] px-3 py-1.5 font-semibold text-white hover:bg-[#388bfd]">
-              {hasAccess ? "Dashboard" : "Unlock"}
-            </Link>
-          </nav>
-        </header>
+        <div className="max-w-3xl space-y-4">
+          <h1 className="text-balance text-4xl font-semibold tracking-tight text-slate-50 md:text-6xl">
+            Get alerts when startup KPIs drop
+          </h1>
+          <p className="text-lg leading-relaxed text-slate-300 md:text-xl">
+            Startup Metrics Alerter connects your analytics stack, learns normal KPI behavior, and warns you immediately when growth indicators deteriorate.
+          </p>
+        </div>
 
-        <section className="grid gap-10 pb-14 pt-16 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
-          <div>
-            <p className="inline-flex items-center gap-2 rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1 text-xs font-semibold tracking-wide text-[#79c0ff]">
-              <BellRing className="h-3.5 w-3.5" />
-              Founder-focused KPI monitoring
-            </p>
-            <h1 className="mt-5 text-4xl font-semibold leading-tight text-[#f0f6fc] sm:text-5xl">
-              Get alerts when startup KPIs drop before the damage compounds.
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-relaxed text-[#c9d1d9]">
-              Startup Metrics Alerter connects to Google Analytics and Mixpanel, models expected
-              ranges for your core KPIs, and sends smart alerts when momentum slips. No more
-              discovering churn spikes three days late.
-            </p>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Link
+            href={hasAccess ? "/dashboard" : "#pricing"}
+            className="inline-flex h-11 items-center justify-center rounded-md bg-orange-500 px-5 text-sm font-semibold text-slate-950 transition hover:bg-orange-400"
+          >
+            {hasAccess ? "Open Dashboard" : "See Pricing"}
+            <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
+          </Link>
+          <Link
+            href="#solution"
+            className="inline-flex h-11 items-center justify-center rounded-md border border-slate-700 px-5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+          >
+            Explore How It Works
+          </Link>
+        </div>
 
-            <div className="mt-7 flex flex-wrap gap-3">
-              <a
-                href={paymentLink}
-                className="rounded-xl bg-[#238636] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#2ea043]"
-              >
-                Start for $49/month
-              </a>
-              <Link
-                href={hasAccess ? "/dashboard" : "/dashboard/unlock"}
-                className="rounded-xl border border-[#58a6ff] px-5 py-3 text-sm font-semibold text-[#79c0ff] transition hover:bg-[#1f2937]"
-              >
-                {hasAccess ? "Open dashboard" : "I already purchased"}
-              </Link>
-            </div>
+        <CheckoutSessionActivator />
+      </header>
 
-            <p className="mt-3 text-xs text-[#8b949e]">
-              Buy button opens Stripe hosted checkout directly. Configure the payment link success
-              URL to <span className="font-mono text-[#c9d1d9]">/dashboard/unlock?session_id=&#123;CHECKOUT_SESSION_ID&#125;</span> to auto-unlock.
+      <section id="problem" className="grid gap-4 md:grid-cols-3">
+        <article className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+          <Clock className="h-5 w-5 text-orange-300" aria-hidden />
+          <h2 className="mt-3 text-xl font-semibold text-slate-100">Problem</h2>
+          <p className="mt-2 text-sm text-slate-300">
+            Founders don&apos;t check dashboards every day. Performance issues go unnoticed for days until signups and revenue already crater.
+          </p>
+        </article>
+
+        <article className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+          <AlertTriangle className="h-5 w-5 text-orange-300" aria-hidden />
+          <h2 className="mt-3 text-xl font-semibold text-slate-100">Impact</h2>
+          <p className="mt-2 text-sm text-slate-300">
+            Late detection means delayed campaigns, slow debugging, and avoidable churn. Every missed day compounds your CAC and burn.
+          </p>
+        </article>
+
+        <article className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+          <ShieldCheck className="h-5 w-5 text-orange-300" aria-hidden />
+          <h2 className="mt-3 text-xl font-semibold text-slate-100">Outcome</h2>
+          <p className="mt-2 text-sm text-slate-300">
+            Catch downturns within hours, not weeks. Fix broken funnels before they become missed runway milestones.
+          </p>
+        </article>
+      </section>
+
+      <section id="solution" className="space-y-6">
+        <div className="max-w-3xl space-y-3">
+          <p className="text-sm font-semibold uppercase tracking-wider text-orange-300">
+            Solution
+          </p>
+          <h2 className="text-3xl font-semibold text-slate-50 md:text-4xl">
+            Anomaly-aware KPI monitoring built for early-stage founders
+          </h2>
+          <p className="text-slate-300">
+            Connect your analytics tools once, define risk thresholds, and let automated checks evaluate every metric against expected performance bands.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+            <ChartNoAxesCombined className="h-5 w-5 text-orange-300" aria-hidden />
+            <h3 className="mt-3 font-semibold text-slate-100">Unified Data</h3>
+            <p className="mt-2 text-sm text-slate-300">
+              Pull sessions, active users, and event conversions from Google Analytics and Mixpanel into one founder dashboard.
             </p>
           </div>
 
-          <div className="rounded-3xl border border-[#30363d] bg-[#161b22]/80 p-6 shadow-[0_25px_80px_-35px_rgba(1,4,9,0.9)]">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-4">
-                <p className="text-xs uppercase tracking-wide text-[#8b949e]">MRR</p>
-                <p className="mt-2 text-2xl font-semibold text-[#f0f6fc]">$42,180</p>
-                <p className="mt-1 text-xs text-[#ff7b72]">-18.4% vs baseline</p>
-              </div>
-              <div className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-4">
-                <p className="text-xs uppercase tracking-wide text-[#8b949e]">Activation</p>
-                <p className="mt-2 text-2xl font-semibold text-[#f0f6fc]">31.2%</p>
-                <p className="mt-1 text-xs text-[#ff7b72]">-12.1% vs baseline</p>
-              </div>
-            </div>
-            <div className="mt-4 rounded-2xl border border-[#30363d] bg-[#0d1117] p-4">
-              <p className="text-sm font-semibold text-[#f0f6fc]">Latest alert summary</p>
-              <p className="mt-2 text-sm leading-relaxed text-[#c9d1d9]">
-                Signup velocity dropped for six consecutive hours while paid acquisition spend stayed
-                flat. Estimated weekly pipeline impact: 57 fewer trials if trend continues.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section id="problem" className="rounded-3xl border border-[#30363d] bg-[#161b22]/60 p-8">
-          <h2 className="text-2xl font-semibold text-[#f0f6fc]">The Problem</h2>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <AlertCircle className="h-5 w-5 text-[#ff7b72]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">Dashboard fatigue</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                Founders rarely check every dashboard every day, so dangerous drops stay invisible
-                until weekly reviews.
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <ShieldAlert className="h-5 w-5 text-[#f2cc60]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">False alarms</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                Static threshold alerts fire too often on normal variance, so teams mute them and miss
-                real issues.
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <BarChart3 className="h-5 w-5 text-[#58a6ff]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">Delayed fixes</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                By the time drops are spotted, cohort quality and revenue recovery usually take weeks.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section id="solution" className="mt-10 rounded-3xl border border-[#30363d] bg-[#161b22]/60 p-8">
-          <h2 className="text-2xl font-semibold text-[#f0f6fc]">The Solution</h2>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <CheckCircle2 className="h-5 w-5 text-[#3fb950]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">Multi-source KPI sync</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                Pull trends from Google Analytics and Mixpanel in one place, with clear mapping to
-                MRR, activation, signups, trial-to-paid, and churn.
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <Bot className="h-5 w-5 text-[#a371f7]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">Adaptive anomaly scoring</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                An ML-style scoring model compares live values against moving baselines and confidence
-                bands to reduce noise.
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <BellRing className="h-5 w-5 text-[#f2cc60]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">Actionable alerting</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                Send concise alert context to email and Slack with current value, expected value, and
-                estimated drop magnitude.
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[#30363d] bg-[#0d1117] p-5">
-              <ShieldAlert className="h-5 w-5 text-[#79c0ff]" />
-              <h3 className="mt-3 text-base font-semibold text-[#f0f6fc]">Paywalled founder workspace</h3>
-              <p className="mt-2 text-sm text-[#8b949e]">
-                Dashboard access is locked behind verified checkout and secure cookie-based unlock, so
-                your monitoring setup stays private.
-              </p>
-            </article>
-          </div>
-        </section>
-
-        <section id="pricing" className="mt-10 grid gap-6 lg:grid-cols-[1fr_1fr]">
-          <div className="rounded-3xl border border-[#30363d] bg-[#161b22]/60 p-8">
-            <h2 className="text-2xl font-semibold text-[#f0f6fc]">Simple pricing</h2>
-            <p className="mt-2 text-sm text-[#8b949e]">
-              Built for early-stage founders who need reliable monitoring without enterprise tooling
-              overhead.
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+            <BellRing className="h-5 w-5 text-orange-300" aria-hidden />
+            <h3 className="mt-3 font-semibold text-slate-100">Smart Alerting</h3>
+            <p className="mt-2 text-sm text-slate-300">
+              Detect statistically significant drops instead of noisy threshold spam. Severity prioritization highlights true emergencies.
             </p>
-            <p className="mt-6 text-5xl font-semibold text-[#f0f6fc]">
-              $49<span className="text-lg text-[#8b949e]">/month</span>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+            <Clock className="h-5 w-5 text-orange-300" aria-hidden />
+            <h3 className="mt-3 font-semibold text-slate-100">Scheduled Checks</h3>
+            <p className="mt-2 text-sm text-slate-300">
+              Trigger metric checks on a cron schedule so KPI protection runs continuously, even while your team sleeps.
             </p>
-            <ul className="mt-6 space-y-3 text-sm text-[#c9d1d9]">
-              <li>Unlimited monitor runs</li>
-              <li>Google Analytics + Mixpanel integrations</li>
-              <li>Email + Slack alert channels</li>
-              <li>Anomaly confidence controls and quiet hours</li>
-              <li>Metric history and trend visualization</li>
-            </ul>
-            <a
-              href={paymentLink}
-              className="mt-7 inline-flex rounded-xl bg-[#238636] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#2ea043]"
+          </div>
+        </div>
+      </section>
+
+      <section id="pricing" className="grid gap-6 md:grid-cols-[1.2fr_1fr] md:items-start">
+        <div className="space-y-3">
+          <p className="text-sm font-semibold uppercase tracking-wider text-orange-300">
+            Pricing
+          </p>
+          <h2 className="text-3xl font-semibold text-slate-50 md:text-4xl">
+            One plan, built for founder speed
+          </h2>
+          <p className="text-slate-300">
+            Pay monthly, connect your metrics stack, and get immediate protection against hidden KPI regressions.
+          </p>
+        </div>
+
+        <PricingCard />
+      </section>
+
+      <section id="faq" className="space-y-4">
+        <h2 className="text-3xl font-semibold text-slate-50">FAQ</h2>
+        <div className="space-y-3">
+          {faqs.map((faq) => (
+            <article
+              key={faq.question}
+              className="rounded-xl border border-slate-800 bg-slate-900/50 p-5"
             >
-              Buy with Stripe
-            </a>
-          </div>
-
-          <div className="rounded-3xl border border-[#30363d] bg-[#161b22]/60 p-8">
-            <h2 className="text-2xl font-semibold text-[#f0f6fc]">FAQ</h2>
-            <div className="mt-6 space-y-4">
-              {faqs.map((item) => (
-                <article key={item.question} className="rounded-xl border border-[#30363d] bg-[#0d1117] p-4">
-                  <h3 className="text-sm font-semibold text-[#f0f6fc]">{item.question}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-[#8b949e]">{item.answer}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-      </div>
+              <h3 className="text-base font-semibold text-slate-100">{faq.question}</h3>
+              <p className="mt-2 text-sm text-slate-300">{faq.answer}</p>
+            </article>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }
